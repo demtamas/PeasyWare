@@ -24,9 +24,9 @@ This project is structured as a monorepo to keep all related components of the P
 
     /DataBase/: Contains all SQL scripts for creating the database schema, procedures, views, and test data.
 
-    /src/PeasyWare.WMS.Console/: The source code for the .NET console application used by warehouse operators.
+    /PeasyWare.WMS.Console/: The source code for the .NET console application used by warehouse operators.
 
-    /src/PeasyWare.WMS.Desktop/: (Placeholder) For the future administrative desktop application.
+    /PeasyWare.WMS.Desktop/: (Placeholder) For the future administrative desktop application.
 
     /docs/: Contains project documentation, such as flowcharts and design notes.
 
@@ -65,7 +65,7 @@ Installation & Setup
 
     Configure the Connection String:
 
-        Navigate to the /src/PeasyWare.WMS.Console/ folder.
+        Navigate to the /PeasyWare.WMS.Console/ folder.
 
         Open the appsettings.json file.
 
@@ -73,7 +73,7 @@ Installation & Setup
 
     Build and Run the Application:
 
-        Open a terminal in the /src/PeasyWare.WMS.Console/ directory.
+        Open a terminal in the /PeasyWare.WMS.Console/ directory.
 
         Run the following commands:
 
@@ -119,3 +119,4 @@ The following features are planned for future development:
     [ ] Shipping Module: To manage dispatched goods.
 
     [ ] Desktop Admin Application: A GUI for managing master data, users, and system settings.
+

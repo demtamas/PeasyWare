@@ -1,0 +1,1 @@
+SELECT *FROM [WMS_DB].[views].[Inventory_summary]

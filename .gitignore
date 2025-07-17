@@ -47,4 +47,5 @@ TestResults/
 
 # Add any project-specific files you want to ignore here.
 # For now, the standard template above is sufficient.
+DataBase/tests/
 

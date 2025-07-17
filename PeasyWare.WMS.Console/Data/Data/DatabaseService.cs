@@ -73,6 +73,11 @@ public class DatabaseService
                                 bool.TryParse(settingValue, out bool allowModification);
                                 config.AllowPutawayModification = allowModification;
                                 break;
+                            // In the LoadConfigurationAsync method, add this new case to the switch block:
+                            case "ShowExpectedOnReceive":
+                                bool.TryParse(settingValue, out bool showExpected);
+                                config.ShowExpectedOnReceive = showExpected;
+                                break;
                             case "ReservationTimeoutMinutes":
                                 int.TryParse(settingValue, out int reservationTimeout);
                                 config.ReservationTimeoutMinutes = reservationTimeout;
@@ -459,7 +464,7 @@ public class DatabaseService
     /// </summary>
     /// <param name="externalId">The external ID of the pallet.</param>
     /// <returns>An ActiveTaskDetails object if a task is found; otherwise, null.</returns>
-        public async Task<ActiveTaskDetails?> GetActiveTaskForPalletAsync(string externalId)
+    public async Task<ActiveTaskDetails?> GetActiveTaskForPalletAsync(string externalId)
     {
         ActiveTaskDetails? task = null;
         using (var connection = new SqlConnection(_connectionString))
@@ -491,7 +496,7 @@ public class DatabaseService
         }
         return task;
     }
-    
+
     public async Task<LocationReservation?> GetReservationForPalletAsync(string externalId)
     {
         LocationReservation? reservation = null;
@@ -565,5 +570,195 @@ public class DatabaseService
             }
         }
         catch (Exception) { return false; }
+    }
+
+    /// <summary>
+    /// Retrieves a list of all inbound deliveries that are ready to be activated.
+    /// </summary>
+    /// <returns>A list of InboundDeliverySummary objects.</returns>
+    public async Task<List<InboundDeliverySummary>> GetActivatableInboundsAsync()
+    {
+        var deliveries = new List<InboundDeliverySummary>();
+        using (var connection = new SqlConnection(_connectionString))
+        {
+            var command = new SqlCommand("deliveries.usp_GetActivatableInbounds", connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+            await connection.OpenAsync();
+            using (var reader = await command.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    deliveries.Add(new InboundDeliverySummary
+                    {
+                        InboundId = Convert.ToInt32(reader["inbound_id"]),
+                        DocumentRef = reader["document_ref"]?.ToString() ?? string.Empty,
+                        ExpectedArrivalDate = Convert.ToDateTime(reader["expected_arrival_date"]),
+                        StatusCode = reader["status"]?.ToString() ?? string.Empty,
+                        StatusDescription = reader["status_description"]?.ToString() ?? string.Empty
+                    });
+                }
+            }
+        }
+        return deliveries;
+    }
+
+    /// <summary>
+    /// Activates a specific inbound delivery, making it ready for receiving.
+    /// </summary>
+    /// <param name="documentRef">The document reference of the delivery to activate.</param>
+    /// <param name="userId">The ID of the user performing the action.</param>
+    /// <returns>True if the activation was successful; otherwise, false.</returns>
+    public async Task<bool> ActivateInboundDeliveryAsync(string documentRef, int userId)
+    {
+        try
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                var command = new SqlCommand("deliveries.usp_ActivateInboundDelivery", connection)
+                {
+                    CommandType = CommandType.StoredProcedure
+                };
+                command.Parameters.AddWithValue("@DocumentRef", documentRef);
+                command.Parameters.AddWithValue("@UserId", userId);
+                await connection.OpenAsync();
+                await command.ExecuteNonQueryAsync();
+                return true;
+            }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Retrieves a list of all inbound deliveries that are activated and ready for receiving.
+    /// </summary>
+    public async Task<List<ReceivableDelivery>> GetReceivableDeliveriesAsync()
+    {
+        var deliveries = new List<ReceivableDelivery>();
+        using (var connection = new SqlConnection(_connectionString))
+        {
+            var command = new SqlCommand("deliveries.usp_GetReceivableDeliveries", connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+            await connection.OpenAsync();
+            using (var reader = await command.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    deliveries.Add(new ReceivableDelivery
+                    {
+                        InboundId = Convert.ToInt32(reader["inbound_id"]),
+                        DocumentRef = reader["document_ref"]?.ToString() ?? string.Empty,
+                        ExpectedArrivalDate = Convert.ToDateTime(reader["expected_arrival_date"]),
+                        StatusDescription = reader["status_description"]?.ToString() ?? string.Empty
+                    });
+                }
+            }
+        }
+        return deliveries;
+    }
+
+    /// Retrieves all line items for a specific inbound delivery.
+    /// </summary>
+    /// <param name="inboundId">The ID of the inbound delivery.</param>
+    public async Task<List<InboundRow>> GetInboundRowsAsync(int inboundId)
+    {
+        var rows = new List<InboundRow>();
+        using (var connection = new SqlConnection(_connectionString))
+        {
+            var command = new SqlCommand("deliveries.usp_GetInboundRows", connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+            command.Parameters.AddWithValue("@InboundId", inboundId);
+            await connection.OpenAsync();
+            using (var reader = await command.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    rows.Add(new InboundRow
+                    {
+                        SkuId = Convert.ToInt32(reader["SkuId"]),
+                        SkuName = reader["SkuName"]?.ToString() ?? string.Empty,
+                        SkuDescription = reader["SkuDescription"]?.ToString() ?? string.Empty,
+                        ExpectedQty = Convert.ToInt32(reader["ExpectedQty"]),
+                        ReceivedQty = Convert.ToInt32(reader["ReceivedQty"]),
+                        ExternalId = reader["ExternalId"]?.ToString() ?? string.Empty,
+                        BatchNumber = reader["BatchNumber"]?.ToString() ?? string.Empty,
+                        BestBeforeDate = reader["BestBeforeDate"] as DateTime?
+                    });
+                }
+            }
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// Executes the receiving transaction for a single pallet with operator-confirmed details.
+    /// </summary>
+    public async Task<bool> ReceivePalletAsync(string documentRef, string externalId, int skuId, int actualQuantity, string actualBatchNumber, DateTime? actualBestBeforeDate, string receivingBayName, int userId)
+    {
+        try
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                var command = new SqlCommand("deliveries.usp_ReceivePallet", connection)
+                {
+                    CommandType = CommandType.StoredProcedure
+                };
+                command.Parameters.AddWithValue("@DocumentRef", documentRef);
+                command.Parameters.AddWithValue("@ExternalId", externalId);
+                command.Parameters.AddWithValue("@SkuId", skuId);
+                command.Parameters.AddWithValue("@ActualQuantity", actualQuantity);
+                command.Parameters.AddWithValue("@ActualBatchNumber", actualBatchNumber);
+                command.Parameters.AddWithValue("@ActualBestBeforeDate", (object)actualBestBeforeDate ?? DBNull.Value);
+                command.Parameters.AddWithValue("@ReceivingBayName", receivingBayName);
+                command.Parameters.AddWithValue("@UserId", userId);
+                await connection.OpenAsync();
+                await command.ExecuteNonQueryAsync();
+                return true;
+            }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+    /// <summary>
+    /// Finalizes a receiving task, updating the inbound delivery header status
+    /// to 'Complete' or 'Partially Complete' based on the received quantities.
+    /// </summary>
+    /// <param name="inboundId">The ID of the inbound delivery to finalize.</param>
+    /// <param name="userId">The ID of the user performing the action.</param>
+    /// <returns>True if the update was successful; otherwise, false.</returns>
+    public async Task<bool> FinalizeReceivingAsync(int inboundId, int userId)
+    {
+        try
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                var command = new SqlCommand("deliveries.usp_FinalizeReceiving", connection)
+                {
+                    CommandType = CommandType.StoredProcedure
+                };
+                
+                command.Parameters.AddWithValue("@InboundId", inboundId);
+                command.Parameters.AddWithValue("@UserId", userId);
+
+                await connection.OpenAsync();
+                await command.ExecuteNonQueryAsync();
+                return true; // Success
+            }
+        }
+        catch (Exception)
+        {
+            // The SP will handle transaction rollback. Return false to indicate failure.
+            return false;
+        }
     }
 }

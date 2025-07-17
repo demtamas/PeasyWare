@@ -1,34 +1,68 @@
 PeasyWare WMS
 
-A modern, professional Warehouse Management System built from the ground up to showcase best practices in WMS design and software engineering.
+A professional Warehouse Management System (WMS) built from the ground up in C# and SQL Server to demonstrate best practices in logistics software, designed with the operational needs of a 3rd party logistics (3PL) provider in mind.
 About The Project
 
-PeasyWare WMS is a personal and professional journey into the development of a modern Warehouse Management System. The goal is not to create a commercial product, but rather to build a comprehensive, robust, and realistic WMS that demonstrates a deep understanding of warehouse operations, from inbound receiving to outbound shipping.
+PeasyWare WMS is a portfolio project demonstrating a professional, full-featured Warehouse Management System. The goal is to showcase a deep understanding of the complex logic, data structures, and operational workflows required to manage a modern warehouse efficiently.
 
-The system is designed based on years of real-world experience with industry-leading WMS platforms like SAP EWM, JDA/Blue Yonder, and Manhattan, incorporating their best features and practices into a clean, modern architecture.
+The system is built around a core stock management module that serves as the single source of truth for all inventory. This backend database is designed to be the central engine for multiple front-end applications, including the current console app, a future desktop admin client, and potential API services.
+Core Architectural Principles
+
+    Database as the Core: All critical business logic, validation, and transactions are handled by robust T-SQL stored procedures, ensuring data integrity and high performance.
+
+    Separation of Concerns: The C# application is built on a clean architecture that separates data access, business services, and user interface logic.
+
+    Flexibility: The system is designed to handle a variety of operational scenarios, including fully pre-advised (ASN/EDI) and blind receiving workflows.
+
+    Auditability: Every significant action, from login attempts to inventory movements, is logged for full traceability.
+
 Built With
 
     Backend & Application Logic: C# with .NET
 
     Database: Microsoft SQL Server
 
-    User Interfaces:
+    Logging: Serilog
 
-        A .NET Console Application for shop-floor operations (current focus).
+Current Features (Console App)
 
-        A Windows Desktop Application (WPF or WinForms) for administrative tasks (future development).
+The console application provides warehouse operators with a clean, efficient, and robust interface for performing core warehouse tasks.
+Guided Putaway
 
-Project Structure (Monorepo)
+A complete, end-to-end workflow for putting away stock, featuring:
 
-This project is structured as a monorepo to keep all related components of the PeasyWare ecosystem in a single, easy-to-manage repository.
+    Intelligent location suggestions based on SKU-level storage type and section preferences.
 
-    /DataBase/: Contains all SQL scripts for creating the database schema, procedures, views, and test data.
+    Workload balancing across aisles to reduce operator congestion.
 
-    /PeasyWare.WMS.Console/: The source code for the .NET console application used by warehouse operators.
+    Robust validation for pallets, locations, and operational status.
 
-    /PeasyWare.WMS.Desktop/: (Placeholder) For the future administrative desktop application.
+    Full support for manual overrides, cancellations, and task resumption.
 
-    /docs/: Contains project documentation, such as flowcharts and design notes.
+Stock & Bin Inquiry
+
+Core lookup functions that provide real-time visibility into the warehouse's inventory.
+
+    Stock Query: View detailed information for a single pallet, including its status, location, quantity, and batch information.
+
+    Bin Query: View the contents of any location, with an aggregated summary for multi-pallet bins and a detailed drill-down view.
+
+Stock Query
+	
+
+Bin Query (Aggregated)
+
+
+	
+
+
+Inbound & Movement
+
+    Inbound Activation: A quality gate to activate inbound deliveries before receiving can begin.
+
+    Receiving: A flexible receiving module that supports fully advised deliveries, allowing operators to verify and amend details (quantity, batch, BBE) before confirming receipt.
+
+    Bin to Bin Movement: A robust function for ad-hoc stock movements, essential for consolidation and manual putaway overrides.
 
 Getting Started
 
@@ -38,8 +72,6 @@ Prerequisites
     Microsoft SQL Server: An instance of SQL Server (2019 or later, including the free Express or Developer editions) is required.
 
     .NET SDK: The .NET SDK (version 8.0 or later) is needed to build and run the console application.
-
-    Git: To clone the repository.
 
 Installation & Setup
 
@@ -61,7 +93,7 @@ Installation & Setup
 
             04_Test_Data.sql
 
-        This will create the WMS_DB database, all necessary tables and procedures, and populate it with test users and data.
+        This will create the WMS_DB database, all necessary objects, and populate it with test data.
 
     Configure the Connection String:
 
@@ -69,7 +101,7 @@ Installation & Setup
 
         Open the appsettings.json file.
 
-        Update the Server property in the DefaultConnection string to point to your SQL Server instance (e.g., localhost, SQLEXPRESS, or a server IP address).
+        Update the Server property in the DefaultConnection string to point to your SQL Server instance.
 
     Build and Run the Application:
 
@@ -82,41 +114,14 @@ Installation & Setup
 
         You can log in with one of the test users (e.g., username: admin, password: admin).
 
-Current Features (Console App v0.4)
-
-The console application currently supports the following core warehouse functions:
-
-    Secure User Login: With different roles and permissions.
-
-    Stock Query: Allows an operator to scan a pallet ID and view its detailed information (material, status, location, etc.).
-
-    Bin Query: Allows an operator to scan a location and view its contents, including an aggregated summary for multi-pallet locations and a detailed drill-down view.
-
-    Guided Putaway: A complete, end-to-end workflow for putting away stock, featuring:
-
-        Intelligent location suggestions based on product type, section preference, and aisle workload.
-
-        Robust validation for pallets and locations.
-
-        Transactional safety for all database operations.
-
-        The ability to Cancel an in-progress task.
-
-        The ability to Modify a system suggestion to a different, manually scanned location.
-
 Project Roadmap
 
-The following features are planned for future development:
+The current console application provides a solid foundation. Future development will focus on expanding the feature set and building out new interfaces.
 
-    [ ] Bin to Bin Movement: For stock consolidation and manual moves.
+    [ ] Cycle Counting: Implement a cycle counting module to ensure inventory accuracy.
 
-    [ ] Cycle Counting: To ensure inventory accuracy.
+    [ ] Outbound Flow: Design and build the picking, allocation, and shipping modules.
 
-    [ ] Receiving Module: To book stock into the warehouse against an ASN.
+    [ ] Desktop Admin Application: Create a GUI for managing master data, users, system settings, and viewing reports.
 
-    [ ] Picking & Allocation Module: To fulfill customer orders.
-
-    [ ] Shipping Module: To manage dispatched goods.
-
-    [ ] Desktop Admin Application: A GUI for managing master data, users, and system settings.
-
+    [ ] API Services: Develop a Web API to allow other systems to query stock or import delivery notifications.

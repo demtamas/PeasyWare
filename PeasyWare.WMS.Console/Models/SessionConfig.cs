@@ -24,6 +24,12 @@ namespace PeasyWare.WMS.Console.Models
         public bool AllowPutawayModification { get; set; }
 
         /// <summary>
+        /// Gets or sets a value indicating whether the receiving screen should display the list
+        /// of expected items. If false, it enables a "blind" receiving workflow.
+        /// </summary>
+        public bool ShowExpectedOnReceive { get; set; } // Add this line
+
+        /// <summary>
         /// Gets or sets the duration in minutes that a location reservation remains active
         /// before being considered expired by the system. Defaults to 15 minutes.
         /// </summary>

@@ -18,8 +18,8 @@ public class Program
         var binInquiryService = new BinInquiryService(dbService);
         var binToBinService = new BinToBinService(dbService); 
         var putawayService = new PutawayService(dbService, config);
-
-        // This changes localIpAddress from a nullable 'string?' to a non-nullable 'string'.
+        var inboundActivationService = new InboundActivationService(dbService);
+        var receivingService = new ReceivingService(dbService, config);
         string localIpAddress = NetworkHelper.GetLocalIpAddress() ?? "UNKNOWN_IP";
 
         // --- 2. LOGGER SETUP ---
@@ -101,7 +101,13 @@ public class Program
                 switch (choice)
                 {
                     case "1":
+                    await inboundActivationService.RunActivationAsync();
+                    break;
+
                     case "2":
+                    await receivingService.RunReceivingAsync();
+                    break;
+
                     case "7":
                     case "8":
                     case "9":

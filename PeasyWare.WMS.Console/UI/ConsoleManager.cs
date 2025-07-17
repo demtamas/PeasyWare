@@ -22,8 +22,8 @@ namespace PeasyWare.WMS.Console.UI
             ResetColor();
             WriteLine($"Operator: {Session.CurrentUser?.FullName} ({Session.CurrentUser?.RoleName})");
             WriteLine("--------------------------------------");
-            WriteLine(" 1. Activating Inbound   (Coming Soon)");
-            WriteLine(" 2. Receiving            (Coming Soon)");
+            WriteLine(" 1. Activating Inbound");
+            WriteLine(" 2. Receiving");
             WriteLine(" 3. Guided Putaway");
             WriteLine(" 4. Bin to Bin Movement");
             WriteLine(" 5. Stock Query");

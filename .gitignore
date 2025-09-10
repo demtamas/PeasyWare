@@ -42,13 +42,7 @@ TestResults/
 *.scc
 
 # ===================================================================
-# PeasyWare WMS Specific Ignores
-# ===================================================================
-
-DataBase/tests/
-
-# ===================================================================
-# macOS system junk
+# macOS specific ignores
 # ===================================================================
 .DS_Store
 .AppleDouble
@@ -61,12 +55,7 @@ ehthumbs.db
 Thumbs.db
 
 # ===================================================================
-# SQL + Local scratch files
+# PeasyWare WMS Specific Ignores
 # ===================================================================
-*.dbmdl
-*.bak
-*.mdf
-*.ldf
-*.sqlite
-*.sqlproj.user
+DataBase/tests/
 

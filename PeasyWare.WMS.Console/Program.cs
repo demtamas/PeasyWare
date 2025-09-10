@@ -3,6 +3,8 @@ using PeasyWare.WMS.Console.UI;
 using PeasyWare.WMS.Console.Services;
 using PeasyWare.WMS.Console.Utilities;
 using PeasyWare.WMS.Console.Models;
+using PeasyWare.WMS.Console.Models.DTOs;
+using PeasyWare.WMS.App.Data;
 
 /// <summary>
 /// The main entry point for the PeasyWare WMS Console Application.

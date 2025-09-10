@@ -530,3 +530,243 @@ INCLUDE (location_id, location_name, is_active, capacity);
 GO
 CREATE NONCLUSTERED INDEX IX_LocationReservations_Expiry ON locations.location_reservations(expires_at, location_id);
 GO
+
+-- =================================================================================
+-- PeasyWare WMS - Deliveries Schema
+-- =================================================================================
+-- INBOUND DELIVERY TABLES
+-- =================================================================================
+
+-- --- Inbound Delivery Status Table ---
+-- Defines the possible statuses for an inbound delivery header. This allows for
+-- tracking the delivery's progress through the receiving workflow.
+CREATE TABLE deliveries.inbound_status (
+    status_code CHAR(3) PRIMARY KEY,
+    status_description NVARCHAR(100) NOT NULL
+);
+GO
+
+-- --- Inbound Delivery Header Table ---
+-- Represents a single inbound delivery, such as an Advance Shipping Notice (ASN) from a supplier.
+-- This table holds the summary information for the entire delivery.
+CREATE TABLE deliveries.inbound_header (
+    inbound_id INT IDENTITY(1,1) PRIMARY KEY,
+    
+    -- The supplier's reference number for this delivery (e.g., ASN number, delivery note number).
+    -- This is a key field for matching against paperwork.
+    document_ref NVARCHAR(100) NOT NULL,
+    
+    -- A foreign key to a future 'suppliers' table. For now, it's just an integer.
+    supplier_id INT NULL,
+    
+    expected_arrival_date DATE NOT NULL,
+    
+    -- The overall status of the delivery. FK to deliveries.inbound_status.
+    status CHAR(3) NOT NULL DEFAULT 'EXP', -- Default to 'Expected'.
+    
+    -- The critical "activation" flag. Must be true before receiving can begin.
+    -- This acts as a quality gate, similar to EWM's activation check.
+    is_activated_for_receiving BIT NOT NULL DEFAULT 0,
+    
+    -- Aggregated totals for planning. These can be NULL for blind receipts where this
+    -- information is not known in advance.
+    total_expected_pallets INT NULL,
+    total_expected_quantity INT NULL,
+    
+    -- Standard audit columns.
+    created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    created_by NVARCHAR(100) NOT NULL,
+    updated_at DATETIME2 NULL,
+    updated_by NVARCHAR(100) NULL,
+
+    FOREIGN KEY (status) REFERENCES deliveries.inbound_status(status_code)
+);
+GO
+
+-- --- Inbound Delivery Rows Table ---
+-- Represents the individual product lines expected on an inbound delivery.
+-- This design is flexible to handle all your specified scenarios.
+CREATE TABLE deliveries.inbound_rows (
+    inbound_row_id INT IDENTITY(1,1) PRIMARY KEY,
+    inbound_id INT NOT NULL FOREIGN KEY REFERENCES deliveries.inbound_header(inbound_id) ON DELETE CASCADE,
+    
+    -- The SKU that is expected. This is always known.
+    sku_id INT NOT NULL FOREIGN KEY REFERENCES inventory.sku(id),
+    
+    -- The total quantity expected for this SKU on this delivery. This is always known.
+    expected_qty INT NOT NULL,
+    
+    -- The quantity that has been physically received so far. This is updated by the operator.
+    received_qty INT NOT NULL DEFAULT 0,
+    
+    -- For fully advised ASNs (manual or EDI), these fields can be pre-populated.
+    -- For blind/SAP-like receipts, these fields will be NULL initially and are
+    -- populated by the operator during the receiving process.
+    external_id NVARCHAR(100) NULL, -- The SSCC/Pallet ID, if known in advance.
+    batch_number NVARCHAR(100) NULL,
+    best_before_date DATE NULL,
+    
+    -- The status of this specific line item.
+    status NVARCHAR(50) NOT NULL DEFAULT 'Pending', -- e.g., 'Pending', 'Partial', 'Complete'
+    
+    -- Standard audit columns.
+    created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    created_by NVARCHAR(100) NOT NULL,
+    updated_at DATETIME2 NULL,
+    updated_by INT NULL
+);
+GO
+
+
+-- =================================================================================
+-- OUTBOUND DELIVERY TABLES (Initial Design)
+-- =================================================================================
+
+-- --- Outbound Delivery Status Table ---
+CREATE TABLE deliveries.outbound_status (
+    status_code CHAR(3) PRIMARY KEY,
+    status_description NVARCHAR(100) NOT NULL
+);
+GO
+
+-- --- Outbound Delivery Header Table ---
+-- Represents a single outbound delivery, typically corresponding to a customer order.
+CREATE TABLE deliveries.outbound_header (
+    outbound_id INT IDENTITY(1,1) PRIMARY KEY,
+    customer_order_ref NVARCHAR(100) NOT NULL,
+    
+    -- A foreign key to a future 'customers' table.
+    customer_id INT NULL,
+    
+    -- The overall status of the outbound order. FK to deliveries.outbound_status.
+    status CHAR(3) NOT NULL DEFAULT 'NEW', -- Default to 'New'.
+    
+    required_ship_date DATE NOT NULL,
+    
+    -- Standard audit columns.
+    created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    created_by NVARCHAR(100) NOT NULL,
+    updated_at DATETIME2 NULL,
+    updated_by NVARCHAR(100) NULL,
+
+    FOREIGN KEY (status) REFERENCES deliveries.outbound_status(status_code)
+);
+GO
+
+-- --- Outbound Delivery Rows Table ---
+-- Represents the specific pallets or stock items that have been allocated to this outbound order.
+CREATE TABLE deliveries.outbound_rows (
+    outbound_row_id INT IDENTITY(1,1) PRIMARY KEY,
+    outbound_id INT NOT NULL FOREIGN KEY REFERENCES deliveries.outbound_header(outbound_id) ON DELETE CASCADE,
+    
+    -- A direct link to the specific pallet in the inventory that has been allocated.
+    inventory_id INT NOT NULL FOREIGN KEY REFERENCES inventory.inventory(inventory_id),
+    
+    -- The SKU being picked.
+    sku_id INT NOT NULL FOREIGN KEY REFERENCES inventory.sku(id),
+    
+    -- The quantity picked from this specific pallet for this order.
+    picked_qty INT NOT NULL,
+    
+    -- The user who performed the pick.
+    picked_by INT NULL FOREIGN KEY REFERENCES auth.users(user_id),
+    picked_at DATETIME2 NULL
+);
+GO
+
+
+-- =================================================================================
+-- PeasyWare WMS - Deliveries Test Data
+-- Description: This script populates the deliveries schema with a sample
+-- inbound delivery to enable testing of the receiving module.
+-- =================================================================================
+
+USE WMS_DB;
+GO
+
+-- --- Delivery Status Master Data ---
+
+-- Populate the statuses for inbound deliveries.
+INSERT INTO deliveries.inbound_status (status_code, status_description) VALUES
+('EXP', 'Expected'),       -- The delivery is planned but has not yet arrived.
+('ARV', 'Arrived'),        -- The vehicle has arrived on-site.
+('REC', 'Receiving'),      -- An operator is actively receiving items from this delivery.
+('PPC', 'Partially Complete'), -- Some, but not all, items have been received.
+('COM', 'Complete');       -- All expected items have been received.
+GO
+
+-- Populate the statuses for outbound deliveries.
+INSERT INTO deliveries.outbound_status (status_code, status_description) VALUES
+('NEW', 'New Order'),
+('ALC', 'Allocated'),      -- Stock has been allocated to the order.
+('PCK', 'Picking'),        -- An operator is actively picking items for the order.
+('PKD', 'Picked'),         -- All items have been picked and are ready for shipping.
+('SHP', 'Shipped');        -- The order has left the warehouse.
+GO
+
+-- This creates the table to log changes made to inbound delivery rows during receiving.
+CREATE TABLE logs.inbound_row_changes (
+    change_id INT IDENTITY(1,1) PRIMARY KEY,
+    inbound_row_id INT NOT NULL,
+    changed_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    changed_by INT NOT NULL,
+    field_name NVARCHAR(100) NOT NULL, -- e.g., 'Quantity', 'BatchNumber'
+    old_value NVARCHAR(255) NULL,
+    new_value NVARCHAR(255) NULL,
+    reason NVARCHAR(255) NULL -- For future use, e.g., 'Damaged on arrival'
+);
+GO
+
+-- This trigger will automatically populate the audit table whenever an inbound_row is updated.
+CREATE OR ALTER TRIGGER deliveries.trg_inbound_rows_audit
+ON deliveries.inbound_rows
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @UserId INT;
+    
+    -- Get the user ID from the 'updated_by' column of the row that was just modified.
+    SELECT TOP 1 @UserId = updated_by FROM inserted;
+
+    -- Log changes to the received_qty field.
+    INSERT INTO logs.inbound_row_changes (inbound_row_id, changed_by, field_name, old_value, new_value)
+    SELECT 
+        i.inbound_row_id, 
+        @UserId, 
+        'received_qty', 
+        CAST(d.received_qty AS NVARCHAR(255)), 
+        CAST(i.received_qty AS NVARCHAR(255))
+    FROM inserted i
+    JOIN deleted d ON i.inbound_row_id = d.inbound_row_id
+    WHERE i.received_qty <> d.received_qty;
+
+    -- NOTE: We can add similar INSERT statements here to log changes to other fields
+    -- like batch_number or best_before_date in the future.
+END;
+GO
+
+-- Log the EDI transactions
+CREATE TABLE logs.inbound_import_log (
+    import_id INT IDENTITY(1,1) PRIMARY KEY,
+    document_ref NVARCHAR(100),
+    status NVARCHAR(50),             -- 'SUCCESS' or 'FAILED'
+    error_message NVARCHAR(MAX),     -- optional
+    payload NVARCHAR(MAX),           -- raw JSON payload if available
+    imported_at DATETIME2 DEFAULT SYSUTCDATETIME()
+);
+GO
+
+-- Queue up the failed inserts
+CREATE TABLE logs.inbound_import_retry_queue (
+    retry_id INT IDENTITY(1,1) PRIMARY KEY,
+    document_ref NVARCHAR(100) NOT NULL,
+    payload NVARCHAR(MAX) NOT NULL,            -- full original JSON
+    last_error NVARCHAR(MAX) NULL,             -- most recent error message
+    retry_attempts INT NOT NULL DEFAULT 0,
+    last_attempt_at DATETIME2 NULL,
+    status NVARCHAR(50) NOT NULL DEFAULT 'PENDING',  -- PENDING, RETRYING, FAILED, SUCCESS
+    created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+GO
+

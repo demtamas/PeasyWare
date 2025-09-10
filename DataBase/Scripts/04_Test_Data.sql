@@ -221,3 +221,56 @@ VALUES
 ('350101028007388438', 3, '001413958A', '2025-12-31', 60, 60, 'TEST_INB01', 'BL', 2, 8, 'system'),
 ('150101027148160664', 3, '001413958A', '2025-12-31', 75, 75, 'TEST_INB01', 'BL', 2, 8, 'system');
 GO
+
+-- --- Sample Inbound Delivery ---
+
+-- 1. Create Inbound Delivery #1 (1 Pallet)
+INSERT INTO deliveries.inbound_header (document_ref, supplier_id, expected_arrival_date, status, is_activated_for_receiving, total_expected_pallets, total_expected_quantity, created_by)
+VALUES ('ASN-TEST-01', 1, GETDATE(), 'EXP', 0, 1, 180, 'seeder');
+GO
+
+DECLARE @InboundId1 INT;
+SELECT @InboundId1 = inbound_id FROM deliveries.inbound_header WHERE document_ref = 'ASN-TEST-01';
+IF @InboundId1 IS NOT NULL
+BEGIN
+    INSERT INTO deliveries.inbound_rows (inbound_id, sku_id, expected_qty, external_id, batch_number, best_before_date, created_by)
+    VALUES (@InboundId1, 1, 180, '350101028006975227', 'BATCH-001', '2026-06-01', 'seeder');
+END;
+GO
+
+-- 2. Create Inbound Delivery #2 (2 Pallets)
+INSERT INTO deliveries.inbound_header (document_ref, supplier_id, expected_arrival_date, status, is_activated_for_receiving, total_expected_pallets, total_expected_quantity, created_by)
+VALUES ('ASN-TEST-02', 1, GETDATE(), 'EXP', 0, 2, 235, 'seeder');
+GO
+
+DECLARE @InboundId2 INT;
+SELECT @InboundId2 = inbound_id FROM deliveries.inbound_header WHERE document_ref = 'ASN-TEST-02';
+IF @InboundId2 IS NOT NULL
+BEGIN
+    INSERT INTO deliveries.inbound_rows (inbound_id, sku_id, expected_qty, external_id, batch_number, best_before_date, created_by)
+    VALUES 
+    (@InboundId2, 2, 160, '250101027278429127', 'BATCH-002', '2026-08-15', 'seeder'),
+    (@InboundId2, 3, 75,  '150101027148160665', 'BATCH-003', '2027-01-01', 'seeder');
+END;
+GO
+
+-- 3. Create Inbound Delivery #3 (3 Pallets)
+INSERT INTO deliveries.inbound_header (document_ref, supplier_id, expected_arrival_date, status, is_activated_for_receiving, total_expected_pallets, total_expected_quantity, created_by)
+VALUES ('ASN-TEST-03', 1, GETDATE(), 'EXP', 0, 3, 415, 'seeder');
+GO
+
+DECLARE @InboundId3 INT;
+SELECT @InboundId3 = inbound_id FROM deliveries.inbound_header WHERE document_ref = 'ASN-TEST-03';
+IF @InboundId3 IS NOT NULL
+BEGIN
+    INSERT INTO deliveries.inbound_rows (inbound_id, sku_id, expected_qty, external_id, batch_number, best_before_date, created_by)
+    VALUES 
+    (@InboundId3, 1, 180, '350101028006975228', 'BATCH-004', '2026-06-01', 'seeder'),
+    (@InboundId3, 2, 160, '250101027278429128', 'BATCH-005', '2026-08-15', 'seeder'),
+    (@InboundId3, 3, 75,  '150101027148160666', 'BATCH-006', '2027-01-01', 'seeder');
+END;
+GO
+
+PRINT '✅ Sample inbound delivery created successfully.';
+GO
+

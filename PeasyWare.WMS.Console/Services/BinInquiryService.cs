@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using PeasyWare.WMS.App.Data;
 using PeasyWare.WMS.Console.Models;
 using static System.Console;
 

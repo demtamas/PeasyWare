@@ -759,3 +759,364 @@ BEGIN
     END CATCH;
 END;
 GO
+
+
+-- =================================================================================
+-- Inbound Delivery Activation Procedures
+-- =================================================================================
+
+-- Retrieves a list of all inbound deliveries that are ready to be activated.
+-- A delivery is considered activatable if it has arrived but not yet been
+-- flagged as ready for receiving.
+CREATE OR ALTER PROCEDURE deliveries.usp_GetActivatableInbounds
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        h.inbound_id,
+        h.document_ref,
+        h.expected_arrival_date,
+        h.status,
+        s.status_description
+    FROM
+        deliveries.inbound_header h
+    JOIN
+        deliveries.inbound_status s ON h.status = s.status_code
+    WHERE
+        h.is_activated_for_receiving = 0  -- Not yet activated
+        AND h.status IN ('EXP', 'ARV') -- It is either 'Expected' or 'Arrived'
+    ORDER BY
+        h.expected_arrival_date, h.document_ref;
+END
+GO
+
+-- Activates a specific inbound delivery, making it available for the receiving process.
+-- This is a critical quality gate in the inbound workflow.
+CREATE OR ALTER PROCEDURE deliveries.usp_ActivateInboundDelivery
+    @DocumentRef NVARCHAR(100),
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        -- We don't need a full transaction here as it's a single, simple update,
+        -- but we use TRY/CATCH for robust error handling.
+
+        UPDATE deliveries.inbound_header
+        SET
+            is_activated_for_receiving = 1,
+            status = 'ARV', -- Set status to 'Arrived' upon activation
+            updated_at = SYSUTCDATETIME(),
+            updated_by = @UserId
+        WHERE
+            document_ref = @DocumentRef
+            AND is_activated_for_receiving = 0; -- Ensure we don't re-activate an already active delivery
+
+        -- Check if any row was actually updated. If not, the delivery was not found or already active.
+        IF @@ROWCOUNT = 0
+        BEGIN
+            THROW 50013, 'Delivery not found or is already activated.', 1;
+        END
+
+    END TRY
+    BEGIN CATCH
+        -- Rethrow the error so the C# application can catch it and display a message.
+        THROW;
+    END CATCH;
+END
+GO
+
+-- =================================================================================
+-- Receiving Procedures
+-- =================================================================================
+
+-- This procedure handles the transactional logic for receiving a single pallet
+-- against an activated inbound delivery.
+
+-- UPDATED: This procedure now correctly updates the status of the inbound_row.
+CREATE OR ALTER PROCEDURE deliveries.usp_GetReceivableDeliveries
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT
+        h.inbound_id,
+        h.document_ref,
+        h.expected_arrival_date,
+        s.status_description
+    FROM
+        deliveries.inbound_header h
+    JOIN
+        deliveries.inbound_status s ON h.status = s.status_code
+    WHERE
+        h.is_activated_for_receiving = 1
+        AND h.status <> 'COM' -- Not yet complete
+    ORDER BY
+        h.expected_arrival_date;
+END
+GO
+
+-- This will be used to populate the bay selection screen for the operator.
+CREATE OR ALTER PROCEDURE locations.usp_GetLocationsByType
+    @TypeName NVARCHAR(100)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT
+        l.location_name
+    FROM
+        locations.locations l
+    JOIN
+        locations.location_types lt ON l.type_id = lt.type_id
+    WHERE
+        lt.type_name = @TypeName AND l.is_active = 1
+    ORDER BY
+        l.location_name;
+END
+GO
+
+-- UPDATED: This procedure now correctly updates the status of the inbound_row.
+-- =================================================================================
+-- Receiving Procedures (V3 - Corrected)
+-- =================================================================================
+-- This procedure handles the transactional logic for receiving a single pallet.
+-- It now accepts the operator-confirmed details as parameters and logs the movement.
+CREATE OR ALTER PROCEDURE deliveries.usp_ReceivePallet
+    @DocumentRef NVARCHAR(100),
+    @ExternalId NVARCHAR(100),
+    @SkuId INT,
+    @ActualQuantity INT, -- The quantity confirmed by the operator.
+    @ActualBatchNumber NVARCHAR(100), -- The batch confirmed by the operator.
+    @ActualBestBeforeDate DATE, -- The BBE confirmed by the operator.
+    @ReceivingBayName NVARCHAR(100),
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- --- 1. Validation ---
+        DECLARE @InboundId INT, @IsActivated BIT, @ReceivingBayId INT, @InboundRowId INT;
+
+        SELECT @InboundId = inbound_id, @IsActivated = is_activated_for_receiving
+        FROM deliveries.inbound_header WHERE document_ref = @DocumentRef;
+
+        IF @InboundId IS NULL THROW 50014, 'Receiving Failed: Inbound delivery not found.', 1;
+        IF @IsActivated = 0 THROW 50015, 'Receiving Failed: Inbound delivery is not activated.', 1;
+
+        SELECT @ReceivingBayId = location_id FROM locations.locations WHERE location_name = @ReceivingBayName;
+        IF @ReceivingBayId IS NULL THROW 50016, 'Receiving Failed: Specified receiving bay does not exist.', 1;
+
+        -- Find the specific inbound row for this pallet/SKU combination.
+        SELECT @InboundRowId = inbound_row_id FROM deliveries.inbound_rows 
+        WHERE inbound_id = @InboundId AND sku_id = @SkuId AND external_id = @ExternalId;
+        
+        IF @InboundRowId IS NULL
+            THROW 50017, 'Receiving Failed: This pallet/product combination is not expected on this delivery.', 1;
+
+        -- --- 2. Create the Inventory Record ---
+        -- The new pallet is created with the operator-confirmed details.
+        INSERT INTO inventory.inventory (
+            external_id, sku_name, batch_number, best_before_date, actual_qty, expected_qty,
+            document_ref, status, location_id, weight_per_unit, created_by
+        )
+        SELECT
+            @ExternalId, @SkuId, @ActualBatchNumber, @ActualBestBeforeDate, @ActualQuantity, @ActualQuantity,
+            @DocumentRef, 'AV', @ReceivingBayId, s.weight_per_unit, @UserId
+        FROM inventory.sku s WHERE s.id = @SkuId;
+        DECLARE @NewInventoryId INT = SCOPE_IDENTITY();
+
+        -- --- 3. Update the Inbound Delivery Row ---
+        UPDATE deliveries.inbound_rows
+        SET 
+            received_qty = received_qty + @ActualQuantity,
+            status = CASE 
+                        WHEN (received_qty + @ActualQuantity) >= expected_qty THEN 'Complete'
+                        ELSE 'Partial'
+                     END,
+            updated_at = SYSUTCDATETIME(),
+            updated_by = @UserId
+        WHERE inbound_row_id = @InboundRowId;
+
+        -- --- 4. Log the RECEIVING Movement ---
+        INSERT INTO inventory.inventory_movements (inventory_id, sku_id, to_location_id, to_status, moved_qty, moved_by, movement_type, note)
+        VALUES (@NewInventoryId, @SkuId, @ReceivingBayId, 'AV', @ActualQuantity, @UserId, 'RECEIVING', 'Pallet received against delivery.');
+
+        -- --- 5. Update the Inbound Delivery Header Status ---
+        DECLARE @TotalExpected INT, @TotalReceived INT;
+        SELECT @TotalExpected = SUM(expected_qty), @TotalReceived = SUM(received_qty)
+        FROM deliveries.inbound_rows WHERE inbound_id = @InboundId;
+
+        IF @TotalReceived >= @TotalExpected
+            UPDATE deliveries.inbound_header SET status = 'COM', updated_at = SYSUTCDATETIME(), updated_by = @UserId WHERE inbound_id = @InboundId;
+        ELSE
+            UPDATE deliveries.inbound_header SET status = 'REC', updated_at = SYSUTCDATETIME(), updated_by = @UserId WHERE inbound_id = @InboundId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END
+GO
+
+-- Retrieves a list of all inbound deliveries that are activated and ready for receiving.
+CREATE OR ALTER PROCEDURE deliveries.usp_GetReceivableDeliveries
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        h.inbound_id,
+        h.document_ref,
+        h.expected_arrival_date,
+        s.status_description -- This JOIN and column is what the C# code needs
+    FROM
+        deliveries.inbound_header h
+    JOIN
+        deliveries.inbound_status s ON h.status = s.status_code
+    WHERE
+        h.is_activated_for_receiving = 1
+        AND h.status NOT IN ('PPC','COM')
+    ORDER BY
+        h.expected_arrival_date;
+END
+GO
+
+-- Retrieves all line items for a specific inbound delivery.
+CREATE OR ALTER PROCEDURE deliveries.usp_GetInboundRows
+    @InboundId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT
+        r.sku_id AS SkuId,
+        s.sku_name AS SkuName,
+        s.sku_desc AS SkuDescription,
+        r.expected_qty AS ExpectedQty,
+        r.received_qty AS ReceivedQty,
+        r.external_id AS ExternalId,
+        r.batch_number AS BatchNumber,
+        r.best_before_date AS BestBeforeDate
+    FROM
+        deliveries.inbound_rows r
+    JOIN
+        inventory.sku s ON r.sku_id = s.id
+    WHERE
+        r.inbound_id = @InboundId;
+END
+GO
+
+-- =================================================================================
+-- Receiving Procedures (V3 - Finalization)
+-- =================================================================================
+
+-- This procedure is called when an operator indicates they are finished with a delivery.
+-- It checks the totals and sets the final status to either Complete or Partially Complete.
+CREATE OR ALTER PROCEDURE deliveries.usp_FinalizeReceiving
+    @InboundId INT,
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @TotalExpected INT;
+    DECLARE @TotalReceived INT;
+    DECLARE @FinalStatus CHAR(3);
+
+    -- Calculate the total expected and received quantities for the entire delivery.
+    SELECT 
+        @TotalExpected = SUM(expected_qty), 
+        @TotalReceived = SUM(received_qty)
+    FROM deliveries.inbound_rows
+    WHERE inbound_id = @InboundId;
+
+    -- Determine the correct final status.
+    IF @TotalReceived >= @TotalExpected
+    BEGIN
+        SET @FinalStatus = 'COM'; -- Complete
+    END
+    ELSE
+    BEGIN
+        SET @FinalStatus = 'PPC'; -- Partially Complete
+    END
+
+    -- Update the header with the final status.
+    UPDATE deliveries.inbound_header
+    SET 
+        status = @FinalStatus,
+        updated_at = SYSUTCDATETIME(),
+        updated_by = @UserId
+    WHERE inbound_id = @InboundId;
+
+END
+GO
+
+CREATE OR ALTER PROCEDURE deliveries.usp_CreateInboundDelivery
+    @DeliveryNumber NVARCHAR(50),
+    @SupplierCode NVARCHAR(50),
+    @ETA DATETIME
+AS
+BEGIN
+    -- TEMP: skipping supplier lookup, assuming null or fixed
+    DECLARE @SupplierId INT = NULL;
+
+    INSERT INTO deliveries.inbound_header (
+        document_ref,
+        supplier_id,
+        expected_arrival_date,
+        status,
+        is_activated_for_receiving,
+        created_by,
+        created_at
+    )
+    VALUES (
+        @DeliveryNumber,
+        @SupplierId,
+        @ETA,
+        'EXP',            -- You decide the meaning; adjust to your enum/logic
+        0,                -- Not activated yet
+        'api-user',       -- Or pass as param later
+        CURRENT_TIMESTAMP
+    );
+
+    SELECT SCOPE_IDENTITY(); -- return generated inbound_id
+END
+GO
+
+CREATE OR ALTER PROCEDURE deliveries.usp_AddInboundLine
+    @DeliveryId INT,
+    @SKU NVARCHAR(50),
+    @Quantity INT,
+    @Status NVARCHAR(10) = NULL,
+    @ExternalId NVARCHAR(100) = NULL,
+    @BatchNumber NVARCHAR(100) = NULL,
+    @BestBeforeDate DATE = NULL,
+    @CreatedBy NVARCHAR(100) = 'system'
+AS
+BEGIN
+    DECLARE @SkuId INT;
+
+    SELECT @SkuId = id
+    FROM inventory.sku
+    WHERE sku_name = @SKU;
+
+    IF @SkuId IS NULL
+    BEGIN
+        RAISERROR('Invalid SKU', 16, 1);
+        RETURN;
+    END
+
+    IF @Status IS NULL
+        SET @Status = 'AV';
+
+    INSERT INTO deliveries.inbound_rows 
+        (inbound_id, sku_id, expected_qty, status, external_id, batch_number, best_before_date, created_by)
+    VALUES 
+        (@DeliveryId, @SkuId, @Quantity, @Status, @ExternalId, @BatchNumber, @BestBeforeDate, @CreatedBy);
+END
+GO
+
+

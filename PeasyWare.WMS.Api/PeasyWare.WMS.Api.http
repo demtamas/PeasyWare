@@ -1,0 +1,6 @@
+@PeasyWare.WMS.Api_HostAddress = http://localhost:5072
+
+GET {{PeasyWare.WMS.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

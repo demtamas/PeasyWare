@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using PeasyWare.WMS.App.Data;
 using PeasyWare.WMS.Console.Models;
 using static System.Console;
 
